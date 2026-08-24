@@ -1,0 +1,132 @@
+// ReachInbox data model.
+//
+// The central modelling decision is ONE ROW PER (campaign × recipient), the
+// `EmailJob`. That single row is simultaneously:
+//   - the unit of scheduling  (its `scheduledAt` drives the BullMQ delay),
+//   - the unit of idempotency  (the atomic SCHEDULED→PROCESSING claim happens on it),
+//   - the row the dashboard renders.
+//
+// There is deliberately NO `bullJobId` column: the BullMQ job id is a pure
+// function of the row id (`email:{id}`), so it can never drift out of sync with
+// the database. MySQL is the source of truth for business state; Redis/BullMQ is
+// scheduling/execution infrastructure only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  googleId  String   @unique
+  email     String   @unique
+  name      String
+  avatarUrl String?  @db.Text
+  createdAt DateTime @default(now())
+
+  senders   Sender[]
+  campaigns Campaign[]
+}
+
+model Sender {
+  id         String   @id @default(cuid())
+  userId     String
+  fromEmail  String
+  fromName   String?
+  smtpHost   String
+  smtpPort   Int
+  smtpUser   String
+  // AES-256-GCM ciphertext (iv:tag:data, hex) — never plaintext. See lib/crypto.ts.
+  smtpPass   String   @db.Text
+  // Optional per-sender hourly override. Falls back to the campaign's hourlyLimit.
+  maxPerHour Int?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs EmailJob[]
+
+  // A user cannot register the same from-address twice.
+  @@unique([userId, fromEmail])
+  @@index([userId])
+}
+
+enum CampaignStatus {
+  SCHEDULED
+  PROCESSING
+  COMPLETED
+  PARTIALLY_FAILED
+  CANCELLED
+}
+
+enum EmailStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+model Campaign {
+  id             String         @id @default(cuid())
+  userId         String
+  subject        String
+  bodyHtml       String         @db.LongText
+  startAt        DateTime
+  delayMs        Int
+  hourlyLimit    Int
+  totalCount     Int
+  status         CampaignStatus @default(SCHEDULED)
+  // Optional client-supplied Idempotency-Key. Scoped per user (see @@unique):
+  // resubmitting the same key returns the existing campaign instead of a duplicate.
+  idempotencyKey String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs EmailJob[]
+
+  // Per-user idempotency. NULLs are distinct in MySQL, so campaigns without a
+  // key never collide; two submits with the same (userId, key) collide by design.
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+}
+
+model EmailJob {
+  id                  String      @id @default(cuid())
+  campaignId          String
+  senderId            String
+  toEmail             String
+  toName              String?
+  // Deterministic 0-based position within the campaign → preserves send ordering
+  // and drives the order-preserving reschedule on a rate-limit deferral.
+  sequenceNumber      Int
+  scheduledAt         DateTime
+  status              EmailStatus @default(SCHEDULED)
+  attempts            Int         @default(0)
+  // Set when a worker wins the atomic claim; used by the reconciler to detect
+  // jobs stranded mid-processing by a hard kill.
+  processingStartedAt DateTime?
+  sentAt              DateTime?
+  messageId           String?
+  previewUrl          String?     @db.Text
+  error               String?     @db.Text
+  updatedAt           DateTime    @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sender   Sender   @relation(fields: [senderId], references: [id], onDelete: Restrict)
+
+  // DB-level dedupe: a recipient appears at most once per campaign.
+  @@unique([campaignId, toEmail])
+  // Reconciler + worker scan overdue work by (status, time).
+  @@index([status, scheduledAt])
+  // Per-sender "sent" history (dashboard "Sent" tab, per-sender analytics).
+  @@index([senderId, sentAt])
+  // Ordered fetch of a campaign's recipients.
+  @@index([campaignId, sequenceNumber])
+}
