@@ -1,0 +1,14 @@
+packages:
+  - backend
+  - frontend
+
+# pnpm v10 blocks lifecycle scripts by default. These need theirs to run:
+# prisma (engine download + client generate), esbuild (tsx/vitest native binary),
+# sharp (next image), msgpackr-extract (bullmq msgpack accel).
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma
+  - esbuild
+  - msgpackr-extract
+  - sharp

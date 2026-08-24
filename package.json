@@ -1,0 +1,26 @@
+{
+  "name": "reachinbox",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c green,cyan \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "seed:senders": "pnpm --filter backend seed:senders",
+    "loadtest": "pnpm --filter backend loadtest",
+    "db:generate": "pnpm --filter backend db:generate",
+    "db:migrate": "prisma migrate dev --schema backend/prisma/schema.prisma --skip-generate && pnpm --filter backend db:generate",
+    "db:deploy": "prisma migrate deploy --schema backend/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema backend/prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.4.2",
+    "prisma": "^6.19.3"
+  }
+}

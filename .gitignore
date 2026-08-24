@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# env — never commit real secrets; .env.example is the template
+.env
+.env.*
+!.env.example
+frontend/.env.local
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# prisma generated client (default output lives under node_modules/.prisma,
+# already covered by node_modules/ above; listed here for clarity)
+backend/prisma/generated/
+
+# logs / os
+*.log
+.DS_Store
+Thumbs.db
+
+# test / coverage
+coverage/
+.vitest/
