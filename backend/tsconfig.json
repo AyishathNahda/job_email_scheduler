@@ -18,5 +18,5 @@
 
     "noEmit": true
   },
-  "include": ["src", "vitest.config.ts"]
+  "include": ["src", "vitest.config.ts", "vitest.setup.ts"]
 }
