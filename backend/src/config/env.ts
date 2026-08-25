@@ -37,6 +37,9 @@ const EnvSchema = z.object({
   MAX_EMAILS_PER_HOUR_PER_SENDER: z.coerce.number().int().positive().default(100),
   GLOBAL_MAX_PER_INTERVAL: z.coerce.number().int().positive().default(10),
   GLOBAL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
+  // BullMQ per-job retry policy for transient send failures (exponential backoff).
+  EMAIL_JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  EMAIL_JOB_BACKOFF_MS: z.coerce.number().int().positive().default(5000),
   // How long an EmailJob may sit in PROCESSING before the reconciler treats it
   // as stranded by a crashed worker and marks it FAILED. Must be comfortably
   // longer than a legitimate send (SMTP connect + handshake + send).

@@ -7,7 +7,7 @@
 //   - the row the dashboard renders.
 //
 // There is deliberately NO `bullJobId` column: the BullMQ job id is a pure
-// function of the row id (`email:{id}`), so it can never drift out of sync with
+// function of the row id (`email-{id}`), so it can never drift out of sync with
 // the database. MySQL is the source of truth for business state; Redis/BullMQ is
 // scheduling/execution infrastructure only.
 
