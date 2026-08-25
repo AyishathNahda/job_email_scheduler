@@ -20,6 +20,8 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
 
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  // Session (JWT) lifetime. Drives both the token `exp` and the cookie maxAge.
+  SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(604_800), // 7 days
 
   // AES-256-GCM needs a 32-byte key; we store it as 64 hex chars.
   ENCRYPTION_KEY: z

@@ -1,28 +1,45 @@
-import express from 'express';
 import { env } from './config/env';
+import { buildApp } from './http/app';
 import { logger } from './lib/logger';
+import { prisma } from './lib/prisma';
+import { newRedis } from './queue/connection';
+import { closeQueue } from './queue/emailQueue';
 
 /**
  * API process entry. Deliberately separate from worker.ts: the HTTP layer never
- * runs scheduling logic, and the two scale independently. Fleshed out in later
- * phases (auth, campaigns, emails, senders). For now it validates env at boot
- * and exposes a liveness probe.
+ * runs scheduling logic, and the two scale independently. This file owns exactly
+ * the things a test's buildApp() must not — the listening socket, the health
+ * check's Redis client, and graceful shutdown.
  */
-const app = express();
-
-app.get('/healthz', (_req, res) => {
-  // Phase 6 upgrades this to actually ping Redis + MySQL.
-  res.json({ ok: true, service: 'api' });
-});
+const opsRedis = newRedis();
+const app = buildApp({ redis: opsRedis });
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'API listening');
 });
 
-// Clean shutdown so nodemon/tsx restarts and container stops don't leak the port.
+let shuttingDown = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info({ signal }, 'API shutting down');
-    server.close(() => process.exit(0));
+
+    // Stop accepting connections, then release every held resource. The API
+    // imports the queue module (campaign creation enqueues), so its Redis
+    // connection must be closed here too or the process would hang on exit.
+    server.close(() => {
+      void (async () => {
+        try {
+          await closeQueue();
+          await opsRedis.quit();
+          await prisma.$disconnect();
+        } catch (err) {
+          logger.error({ err }, 'error during API shutdown');
+        } finally {
+          process.exit(0);
+        }
+      })();
+    });
   });
 }

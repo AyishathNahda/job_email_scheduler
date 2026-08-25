@@ -77,6 +77,27 @@ export async function enqueueEmailJobs(
   }
 }
 
+/**
+ * Remove the delayed BullMQ jobs for the given rows — used by campaign
+ * cancellation. Best-effort by design: MySQL is the source of truth, so the
+ * authoritative cancel is flipping the row to CANCELLED (the worker's Gate-1
+ * load then skips it). Pulling the delayed job out of Redis is just an
+ * optimisation so a cancelled send never wakes the worker at all.
+ *
+ * `remove()` throws if a job is currently locked (actively being processed); we
+ * swallow that per-job, because such a job is already past the point of
+ * cancellation and the DB status is what protects correctness.
+ */
+export async function removeEmailJobs(emailJobIds: readonly string[]): Promise<void> {
+  for (const id of emailJobIds) {
+    try {
+      await emailQueue.remove(emailJobKey(id));
+    } catch {
+      // Locked/active or already gone — safe to ignore (see doc comment).
+    }
+  }
+}
+
 /** Close the queue's Redis connection. Called on graceful shutdown. */
 export async function closeQueue(): Promise<void> {
   await emailQueue.close();
