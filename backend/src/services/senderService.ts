@@ -83,22 +83,45 @@ export const UpdateSenderInputSchema = z
 
 export type UpdateSenderInput = z.infer<typeof UpdateSenderInputSchema>;
 
-/** List a user's senders, newest first. Falls back to available active system senders so new OAuth users can test immediately. */
+/** List a user's senders, newest first. Auto-provisions default Ethereal sender if none exist. */
 export async function listSenders(userId: string): Promise<SenderSummary[]> {
   const userSenders = await prisma.sender.findMany({
-    where: { userId },
+    where: { userId, isActive: true },
     orderBy: { createdAt: 'desc' },
     select: senderSelect,
   });
   if (userSenders.length > 0) return userSenders;
 
-  return prisma.sender.findMany({
+  const activeSenders = await prisma.sender.findMany({
     where: { isActive: true },
     orderBy: { createdAt: 'asc' },
     select: senderSelect,
     take: 5,
   });
+  if (activeSenders.length > 0) return activeSenders;
+
+  // Auto-provision default Ethereal test sender if DB is completely fresh/empty
+  const etherealUser = process.env.ETHEREAL_USER || 'jacinto.nader9@ethereal.email';
+  const etherealPass = process.env.ETHEREAL_PASS || '3rdW93XJzUGFcsQUpE';
+  const etherealHost = process.env.ETHEREAL_HOST || 'smtp.ethereal.email';
+  const etherealPort = Number(process.env.ETHEREAL_PORT || 587);
+
+  const autoCreated = await prisma.sender.create({
+    data: {
+      userId,
+      fromEmail: etherealUser,
+      fromName: 'Jacinto Nader',
+      smtpHost: etherealHost,
+      smtpPort: etherealPort,
+      smtpUser: etherealUser,
+      smtpPass: encrypt(etherealPass),
+      isActive: true,
+    },
+    select: senderSelect,
+  });
+  return [autoCreated];
 }
+
 
 
 /** Create a sender for the user. The SMTP password is encrypted at rest. */
