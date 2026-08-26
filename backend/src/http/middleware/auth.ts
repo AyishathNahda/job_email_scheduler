@@ -10,7 +10,7 @@ export const SESSION_COOKIE = 'session';
 export function sessionCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: env.isProd ? 'none' : 'lax',
     secure: env.isProd,
     path: '/',
     maxAge: env.SESSION_TTL_SECONDS * 1000,
@@ -20,8 +20,14 @@ export function sessionCookieOptions(): CookieOptions {
 /** Attributes used to CLEAR the cookie — identical to the set options minus the
  *  lifetime, which the browser requires to match for the deletion to take. */
 function clearCookieOptions(): CookieOptions {
-  return { httpOnly: true, sameSite: 'lax', secure: env.isProd, path: '/' };
+  return {
+    httpOnly: true,
+    sameSite: env.isProd ? 'none' : 'lax',
+    secure: env.isProd,
+    path: '/',
+  };
 }
+
 
 /** Set the httpOnly session cookie carrying the signed JWT. */
 export function setSessionCookie(res: Response, token: string): void {
