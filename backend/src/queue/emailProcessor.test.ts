@@ -150,6 +150,31 @@ describe('processEmailJob', () => {
     expect(row.status).toBe('SENT');
   });
 
+  it('proves compare-and-swap idempotency: 10 concurrent claims yield exactly one winner', async () => {
+    const id = await createRow('SCHEDULED');
+
+    // Run the atomic CAS claim operation concurrently 10 times on the exact same row.
+    const claims = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        prisma.emailJob.updateMany({
+          where: { id, status: 'SCHEDULED' },
+          data: { status: 'PROCESSING', processingStartedAt: new Date(), attempts: { increment: 1 } },
+        }),
+      ),
+    );
+
+    const winningClaims = claims.filter((c) => c.count === 1);
+    const losingClaims = claims.filter((c) => c.count === 0);
+
+    // Exactly one caller wins the atomic CAS claim; all 9 others receive count === 0.
+    expect(winningClaims).toHaveLength(1);
+    expect(losingClaims).toHaveLength(9);
+
+    const row = await prisma.emailJob.findUniqueOrThrow({ where: { id } });
+    expect(row.status).toBe('PROCESSING');
+    expect(row.attempts).toBe(1);
+  });
+
   it('skips an already-SENT row without re-sending', async () => {
     const id = await createRow('SENT');
     const { job } = fakeJob(id);

@@ -189,6 +189,28 @@ describe('campaign lifecycle', () => {
     expect(res.body.campaign.counts.scheduled).toBe(2);
   });
 
+  it('lists all user jobs with counts across campaigns via /jobs', async () => {
+    const res = await alice.get('/api/campaigns/jobs?status=SCHEDULED');
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.counts.scheduled).toBe(2);
+    expect(res.body.items[0].campaignSubject).toBe('Launch announcement');
+  });
+
+  it('rejects invalid campaign payload with 400 VALIDATION_ERROR', async () => {
+    const res = await alice.post('/api/campaigns').send({
+      subject: '',
+      bodyHtml: '',
+      startAt: 'invalid-date',
+      delayMs: -1,
+      hourlyLimit: 0,
+      recipients: [],
+      senderIds: [],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('lists the campaign jobs in send order', async () => {
     const res = await alice.get(`/api/campaigns/${campaignId}/jobs`);
     expect(res.status).toBe(200);

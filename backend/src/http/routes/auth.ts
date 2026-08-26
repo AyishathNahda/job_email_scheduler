@@ -62,3 +62,16 @@ authRouter.post('/logout', (_req, res) => {
   clearSessionCookie(res);
   res.status(204).end();
 });
+
+if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
+  authRouter.post(
+    '/dev-login',
+    asyncHandler(async (_req, res) => {
+      const { getOrCreateDevUser } = await import('../../services/authService');
+      const user = await getOrCreateDevUser();
+      setSessionCookie(res, signSession({ userId: user.id, email: user.email }));
+      res.status(200).json({ user });
+    }),
+  );
+}
+

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 
-// The real UI (login → dashboard) is built in Phase 7.
+// The authenticated area lives under /campaigns; the (app) route-group guard
+// bounces unauthenticated visitors on to /login.
 export default function Home() {
-  redirect('/login');
+  redirect('/campaigns');
 }

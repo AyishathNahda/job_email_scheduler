@@ -79,10 +79,14 @@ export async function createCampaign(
     if (existing) return existing;
   }
 
-  // ── Verify senders belong to the caller and are active ──────────────────
+  // ── Verify senders belong to the caller and are active (or system active senders) ──
   const senderIds = [...new Set(input.senderIds)];
   const senders = await prisma.sender.findMany({
-    where: { id: { in: senderIds }, userId, isActive: true },
+    where: {
+      id: { in: senderIds },
+      OR: [{ userId }, { isActive: true }],
+      isActive: true,
+    },
     select: { id: true },
   });
   const foundIds = new Set(senders.map((s) => s.id));
@@ -90,6 +94,7 @@ export async function createCampaign(
   if (missing.length > 0) {
     throw AppError.validation('One or more senders are unknown or inactive', { senderIds: missing });
   }
+
 
   // ── Normalise + dedupe recipients ───────────────────────────────────────
   // Emails are case-insensitive; lowercasing also matches the @@unique(
@@ -448,6 +453,187 @@ export async function getCampaignJobs(
     nextCursor: hasMore && page.length > 0 ? page[page.length - 1]!.id : null,
   };
 }
+
+export const ListAllJobsQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
+  status: z.enum(EMAIL_STATUSES).optional(),
+  search: z.string().trim().optional(),
+});
+export type ListAllJobsQuery = z.infer<typeof ListAllJobsQuerySchema>;
+
+export interface AllJobsItem {
+  id: string;
+  campaignId: string;
+  campaignSubject: string;
+  senderId: string;
+  senderEmail: string;
+  senderName: string | null;
+  toEmail: string;
+  toName: string | null;
+  sequenceNumber: number;
+  status: string;
+  scheduledAt: Date;
+  sentAt: Date | null;
+  messageId: string | null;
+  previewUrl: string | null;
+  error: string | null;
+  attempts: number;
+}
+
+export interface AllJobsPage extends Page<AllJobsItem> {
+  counts: StatusCounts & { total: number };
+}
+
+/**
+ * List all email jobs across all campaigns owned by the user, with optional
+ * status filtering, search across recipient/subject, keyset pagination, and
+ * real-time user-wide status tallies for the dashboard.
+ */
+export async function listAllJobs(
+  userId: string,
+  query: ListAllJobsQuery,
+): Promise<AllJobsPage> {
+  const searchFilter = query.search
+    ? {
+        OR: [
+          { toEmail: { contains: query.search } },
+          { toName: { contains: query.search } },
+          { campaign: { subject: { contains: query.search } } },
+        ],
+      }
+    : {};
+
+  const baseWhere = {
+    campaign: { userId },
+    ...(query.status ? { status: query.status } : {}),
+    ...searchFilter,
+  };
+
+  const isSentTab = query.status === 'SENT';
+
+  // Anchor resolution for keyset pagination
+  let cursorWhere = {};
+  if (query.cursor) {
+    const anchor = await prisma.emailJob.findFirst({
+      where: { id: query.cursor, campaign: { userId } },
+      select: { id: true, scheduledAt: true, sentAt: true },
+    });
+    if (anchor) {
+      if (isSentTab && anchor.sentAt) {
+        cursorWhere = {
+          OR: [
+            { sentAt: { lt: anchor.sentAt } },
+            { sentAt: anchor.sentAt, id: { lt: anchor.id } },
+          ],
+        };
+      } else {
+        cursorWhere = {
+          OR: [
+            { scheduledAt: { gt: anchor.scheduledAt } },
+            { scheduledAt: anchor.scheduledAt, id: { gt: anchor.id } },
+          ],
+        };
+      }
+    }
+  }
+
+  const orderBy = isSentTab
+    ? [{ sentAt: 'desc' as const }, { id: 'desc' as const }]
+    : [{ scheduledAt: 'asc' as const }, { id: 'asc' as const }];
+
+  const [rows, groupedCounts] = await Promise.all([
+    prisma.emailJob.findMany({
+      where: {
+        ...baseWhere,
+        ...cursorWhere,
+      },
+      include: {
+        campaign: { select: { subject: true } },
+        sender: { select: { fromEmail: true, fromName: true } },
+      },
+      orderBy,
+      take: query.limit + 1,
+    }),
+    prisma.emailJob.groupBy({
+      by: ['status'],
+      where: { campaign: { userId } },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const counts: StatusCounts & { total: number } = {
+    scheduled: 0,
+    processing: 0,
+    sent: 0,
+    failed: 0,
+    cancelled: 0,
+    total: 0,
+  };
+
+  for (const g of groupedCounts) {
+    applyStatusCount(counts, g.status, g._count._all);
+    counts.total += g._count._all;
+  }
+
+  const hasMore = rows.length > query.limit;
+  const page = hasMore ? rows.slice(0, query.limit) : rows;
+
+  return {
+    items: page.map((row) => ({
+      id: row.id,
+      campaignId: row.campaignId,
+      campaignSubject: row.campaign.subject,
+      senderId: row.senderId,
+      senderEmail: row.sender.fromEmail,
+      senderName: row.sender.fromName,
+      toEmail: row.toEmail,
+      toName: row.toName,
+      sequenceNumber: row.sequenceNumber,
+      status: row.status,
+      scheduledAt: row.scheduledAt,
+      sentAt: row.sentAt,
+      messageId: row.messageId,
+      previewUrl: row.previewUrl,
+      error: row.error,
+      attempts: row.attempts,
+    })),
+    nextCursor: hasMore && page.length > 0 ? page[page.length - 1]!.id : null,
+    counts,
+  };
+}
+
+export async function getJobById(userId: string, jobId: string) {
+  const job = await prisma.emailJob.findFirst({
+    where: { id: jobId, campaign: { userId } },
+    include: {
+      campaign: { select: { id: true, subject: true, bodyHtml: true, createdAt: true } },
+      sender: { select: { id: true, fromEmail: true, fromName: true } },
+    },
+  });
+  if (!job) throw AppError.notFound('Email job not found');
+  return {
+    id: job.id,
+    campaignId: job.campaignId,
+    campaignSubject: job.campaign.subject,
+    campaignBodyHtml: job.campaign.bodyHtml,
+    campaignCreatedAt: job.campaign.createdAt,
+    senderId: job.senderId,
+    senderEmail: job.sender.fromEmail,
+    senderName: job.sender.fromName,
+    toEmail: job.toEmail,
+    toName: job.toName,
+    sequenceNumber: job.sequenceNumber,
+    status: job.status,
+    scheduledAt: job.scheduledAt,
+    sentAt: job.sentAt,
+    messageId: job.messageId,
+    previewUrl: job.previewUrl,
+    error: job.error,
+    attempts: job.attempts,
+  };
+}
+
 
 export interface CancelCampaignResult {
   id: string;

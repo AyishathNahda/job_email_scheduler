@@ -6,6 +6,9 @@ import {
   CreateCampaignInputSchema,
   getCampaign,
   getCampaignJobs,
+  getJobById,
+  listAllJobs,
+  ListAllJobsQuerySchema,
   listCampaigns,
   ListCampaignsQuerySchema,
   ListJobsQuerySchema,
@@ -55,6 +58,25 @@ campaignsRouter.get(
     res.json(await listCampaigns(userId, parsed.data));
   }),
 );
+
+campaignsRouter.get(
+  '/jobs',
+  asyncHandler(async (req, res) => {
+    const { userId } = authed(req);
+    const parsed = ListAllJobsQuerySchema.safeParse(req.query);
+    if (!parsed.success) throw AppError.validation('Invalid query', parsed.error.flatten());
+    res.json(await listAllJobs(userId, parsed.data));
+  }),
+);
+
+campaignsRouter.get(
+  '/jobs/:jobId',
+  asyncHandler(async (req, res) => {
+    const { userId } = authed(req);
+    res.json({ job: await getJobById(userId, pathParam(req, 'jobId')) });
+  }),
+);
+
 
 campaignsRouter.get(
   '/:id',

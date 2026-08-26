@@ -84,4 +84,21 @@ describe('checkSenderRateLimit', () => {
     // B is completely unaffected.
     expect((await checkSenderRateLimit(redis, b, opts)).allowed).toBe(true);
   });
+
+  it('resets hourly quota when advancing to the next UTC hour window', async () => {
+    const sender = SENDERS[0]!;
+    const MS_PER_HOUR = 3600_000;
+    const opts = { maxPerHour: 2, minGapMs: 0, nowMs: T };
+
+    // Consume all 2 slots in hour 0
+    expect((await checkSenderRateLimit(redis, sender, opts)).allowed).toBe(true);
+    expect((await checkSenderRateLimit(redis, sender, opts)).allowed).toBe(true);
+    expect((await checkSenderRateLimit(redis, sender, opts)).allowed).toBe(false);
+
+    // Advance virtual clock to next hour: quota resets
+    const nextHourOpts = { maxPerHour: 2, minGapMs: 0, nowMs: T + MS_PER_HOUR };
+    const nextHourAttempt = await checkSenderRateLimit(redis, sender, nextHourOpts);
+    expect(nextHourAttempt.allowed).toBe(true);
+  });
 });
+

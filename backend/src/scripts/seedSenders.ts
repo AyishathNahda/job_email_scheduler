@@ -9,13 +9,10 @@ import { prisma } from '../lib/prisma';
  *
  *   pnpm --filter backend seed:senders [count]   (default 3)
  *
- * Ethereal throttles new-account creation (repeated createTestAccount() calls
- * return the SAME mailbox for minutes), so we provision ONE real mailbox and
- * register several logical senders against it using plus-alias from-addresses
- * (foo@…, foo+2@…, foo+3@…). Ethereal is a catch-all, so every message —
- * whatever the alias — lands in that single inbox, which is exactly what you
- * want for a demo. Each Sender row is still a distinct entity with its own id,
- * which is what the per-sender rate limiter keys on.
+ * Prefers ETHEREAL_USER / ETHEREAL_PASS from .env so you can reuse a specific
+ * mailbox (e.g. the one shown in the Ethereal UI) instead of creating a new
+ * random account each run. Falls back to nodemailer.createTestAccount() when
+ * those vars are absent.
  *
  * SMTP passwords are stored AES-256-GCM encrypted, never in plaintext.
  * Idempotent: re-running with enough senders already present is a no-op.
@@ -26,8 +23,26 @@ const DEV_USER_GOOGLE_ID = 'dev-seed-user';
 const DEFAULT_SENDER_COUNT = 3;
 const CREATE_ACCOUNT_ATTEMPTS = 3;
 
-/** Provision one Ethereal mailbox, retrying only on transient network errors. */
+/** Use env-provided Ethereal creds or fall back to creating a random account. */
 async function provisionAccount(): Promise<TestAccount> {
+  const user = process.env.ETHEREAL_USER;
+  const pass = process.env.ETHEREAL_PASS;
+
+  if (user && pass) {
+    const host = process.env.ETHEREAL_HOST ?? 'smtp.ethereal.email';
+    const port = Number(process.env.ETHEREAL_PORT ?? 587);
+    logger.info({ user, host, port }, 'seed: using env-provided Ethereal account');
+    return {
+      user,
+      pass,
+      smtp: { host, port, secure: false },
+      imap: { host: 'imap.ethereal.email', port: 993, secure: true },
+      pop3: { host: 'pop3.ethereal.email', port: 995, secure: true },
+      web: 'https://ethereal.email',
+    } as unknown as TestAccount;
+  }
+
+  // Fall back to creating a fresh random account
   let lastErr: unknown;
   for (let attempt = 1; attempt <= CREATE_ACCOUNT_ATTEMPTS; attempt++) {
     try {

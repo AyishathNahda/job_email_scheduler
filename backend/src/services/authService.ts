@@ -54,3 +54,22 @@ export async function upsertUserFromGoogle(identity: GoogleIdentity): Promise<Au
 export async function getUserById(userId: string): Promise<AuthedUser | null> {
   return prisma.user.findUnique({ where: { id: userId }, select: userSelect });
 }
+
+/** Find-or-create the local default development user for quick testing. */
+export async function getOrCreateDevUser(): Promise<AuthedUser> {
+  const existing = await prisma.user.findFirst({
+    where: { email: 'dev@reachinbox.local' },
+    select: userSelect,
+  });
+  if (existing) return existing;
+
+  return prisma.user.create({
+    data: {
+      googleId: 'dev_user_reachinbox',
+      email: 'dev@reachinbox.local',
+      name: 'Dev User',
+    },
+    select: userSelect,
+  });
+}
+

@@ -83,14 +83,23 @@ export const UpdateSenderInputSchema = z
 
 export type UpdateSenderInput = z.infer<typeof UpdateSenderInputSchema>;
 
-/** List a user's senders, newest first. Never includes the password. */
+/** List a user's senders, newest first. Falls back to available active system senders so new OAuth users can test immediately. */
 export async function listSenders(userId: string): Promise<SenderSummary[]> {
-  return prisma.sender.findMany({
+  const userSenders = await prisma.sender.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
     select: senderSelect,
   });
+  if (userSenders.length > 0) return userSenders;
+
+  return prisma.sender.findMany({
+    where: { isActive: true },
+    orderBy: { createdAt: 'asc' },
+    select: senderSelect,
+    take: 5,
+  });
 }
+
 
 /** Create a sender for the user. The SMTP password is encrypted at rest. */
 export async function createSender(
