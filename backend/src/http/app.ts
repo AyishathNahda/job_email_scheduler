@@ -31,10 +31,30 @@ export function buildApp(deps: AppDeps = {}): Express {
   app.set('trust proxy', 1);
 
   app.use(pinoHttp({ logger }));
-  // Cookies carry the session, so CORS must allow credentials and echo the
-  // single configured frontend origin (a wildcard is illegal with credentials).
-  app.use(cors({ origin: env.FRONTEND_ORIGIN, credentials: true }));
+
+  // Sanitize configured frontend origin (strip trailing slash if present)
+  const configuredOrigin = env.FRONTEND_ORIGIN.replace(/\/+$/, '');
+
+  // Cookies carry the session, so CORS must allow credentials and echo matching origins
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const normalized = origin.replace(/\/+$/, '');
+        if (
+          normalized === configuredOrigin ||
+          normalized === 'http://localhost:3000' ||
+          normalized.endsWith('.vercel.app')
+        ) {
+          return callback(null, true);
+        }
+        callback(null, false);
+      },
+      credentials: true,
+    }),
+  );
   app.use(express.json({ limit: env.MAX_UPLOAD_BYTES }));
+
   app.use(cookieParser());
 
   // Liveness + dependency check: pings MySQL, and Redis when a client is wired.
