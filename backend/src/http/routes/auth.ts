@@ -40,8 +40,9 @@ authRouter.post(
 
     const identity = await verifyGoogleIdToken(idToken);
     const user = await upsertUserFromGoogle(identity);
-    setSessionCookie(res, signSession({ userId: user.id, email: user.email }));
-    res.status(200).json({ user });
+    const token = signSession({ userId: user.id, email: user.email });
+    setSessionCookie(res, token);
+    res.status(200).json({ user, token });
   }),
 );
 
@@ -69,9 +70,11 @@ if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
     asyncHandler(async (_req, res) => {
       const { getOrCreateDevUser } = await import('../../services/authService');
       const user = await getOrCreateDevUser();
-      setSessionCookie(res, signSession({ userId: user.id, email: user.email }));
-      res.status(200).json({ user });
+      const token = signSession({ userId: user.id, email: user.email });
+      setSessionCookie(res, token);
+      res.status(200).json({ user, token });
     }),
   );
+
 }
 

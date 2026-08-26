@@ -53,14 +53,39 @@ interface RequestOptions {
   headers?: Record<string, string>;
 }
 
+const TOKEN_STORAGE_KEY = 'reachinbox_auth_token';
+
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // silent
+  }
+}
+
 /**
- * Single fetch wrapper. Always sends the session cookie (`credentials:
- * 'include'`), parses the shared JSON envelope, and throws a typed `ApiError`
- * on any non-2xx — including a synthetic NETWORK_ERROR when the request never
- * reaches the server.
+ * Single fetch wrapper. Sends the session cookie (`credentials: 'include'`)
+ * AND the Bearer token in the Authorization header to ensure reliable cross-origin
+ * authentication even when third-party cookies are partitioned or blocked by browsers.
  */
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {} } = options;
+  const token = getStoredToken();
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   let res: Response;
   try {
@@ -69,6 +94,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       credentials: 'include',
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...authHeader,
         ...headers,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -112,21 +138,28 @@ export const api = {
     return res.user;
   },
   async loginWithGoogle(idToken: string): Promise<User> {
-    const res = await request<{ user: User }>('/api/auth/google', {
+    const res = await request<{ user: User; token?: string }>('/api/auth/google', {
       method: 'POST',
       body: { idToken },
     });
+    if (res.token) setStoredToken(res.token);
     return res.user;
   },
   async devLogin(): Promise<User> {
-    const res = await request<{ user: User }>('/api/auth/dev-login', {
+    const res = await request<{ user: User; token?: string }>('/api/auth/dev-login', {
       method: 'POST',
     });
+    if (res.token) setStoredToken(res.token);
     return res.user;
   },
   async logout(): Promise<void> {
-    await request<void>('/api/auth/logout', { method: 'POST' });
+    try {
+      await request<void>('/api/auth/logout', { method: 'POST' });
+    } finally {
+      setStoredToken(null);
+    }
   },
+
 
   // Senders
   async listSenders(): Promise<Sender[]> {
