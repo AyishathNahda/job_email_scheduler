@@ -36,6 +36,10 @@ export default function ComposeEmailPage() {
   // Attachments
   const [attachments, setAttachments] = useState<{ name: string; size: string; url: string }[]>([]);
 
+  // CSV Upload feedback message
+  const [csvUploadMessage, setCsvUploadMessage] = useState<{ text: string; isError?: boolean } | null>(null);
+  const csvMessageTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Send Later Popover Modal State
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduledDate, setScheduledDate] = useState<string>(() =>
@@ -89,12 +93,24 @@ export default function ComposeEmailPage() {
   const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (csvMessageTimeoutRef.current) {
+      clearTimeout(csvMessageTimeoutRef.current);
+    }
+    setCsvUploadMessage(null);
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      if (!text) return;
+      if (!text || !text.trim()) {
+        setCsvUploadMessage({ text: 'File is empty.', isError: true });
+        return;
+      }
       const lines = text.split(/\r?\n/);
-      const parsed: RecipientInput[] = [];
+      const newItems: RecipientInput[] = [];
+      let totalValidInFile = 0;
+      let duplicatesSkipped = 0;
+
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -102,18 +118,39 @@ export default function ComposeEmailPage() {
         const email = (comma >= 0 ? trimmed.slice(0, comma) : trimmed).trim().toLowerCase();
         const name = comma >= 0 ? trimmed.slice(comma + 1).trim() : undefined;
         if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-          if (!parsed.some((r) => r.email === email) && !recipients.some((r) => r.email === email)) {
-            parsed.push({ email, name });
+          totalValidInFile++;
+          const alreadyInList = recipients.some((r) => r.email === email);
+          const alreadyInBatch = newItems.some((r) => r.email === email);
+          if (!alreadyInList && !alreadyInBatch) {
+            newItems.push({ email, name: name || undefined });
+          } else {
+            duplicatesSkipped++;
           }
         }
       }
-      if (parsed.length > 0) {
-        setRecipients((prev) => [...prev, ...parsed]);
+
+      if (totalValidInFile === 0) {
+        setCsvUploadMessage({
+          text: 'No valid email addresses found in this file',
+          isError: true,
+        });
+      } else {
+        setRecipients((prev) => [...prev, ...newItems]);
+        const msg =
+          duplicatesSkipped > 0
+            ? `${newItems.length} new added, ${duplicatesSkipped} duplicate${duplicatesSkipped > 1 ? 's' : ''} skipped`
+            : `${totalValidInFile} email address${totalValidInFile === 1 ? '' : 'es'} detected`;
+        setCsvUploadMessage({ text: msg, isError: false });
       }
+
+      csvMessageTimeoutRef.current = setTimeout(() => {
+        setCsvUploadMessage(null);
+      }, 5000);
     };
     reader.readAsText(file);
     e.target.value = '';
   };
+
 
   const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -311,15 +348,32 @@ export default function ComposeEmailPage() {
               />
             </div>
 
-            {/* Upload List Action */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="figma-upload-link"
-            >
-              <UploadIcon style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />
-              Upload List
-            </button>
+            {/* Upload List Action & Feedback */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              {csvUploadMessage && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: csvUploadMessage.isError ? '#ef4444' : '#00a843',
+                    background: csvUploadMessage.isError ? '#fee2e2' : '#e6f7ed',
+                    padding: '3px 10px',
+                    borderRadius: 12,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {csvUploadMessage.text}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="figma-upload-link"
+              >
+                <UploadIcon style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />
+                Upload List
+              </button>
+            </div>
             <input
               type="file"
               ref={fileInputRef}
@@ -329,6 +383,7 @@ export default function ComposeEmailPage() {
             />
           </div>
         </div>
+
 
 
         {/* Subject Row */}

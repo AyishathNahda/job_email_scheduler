@@ -12,8 +12,10 @@ export default function LoginPage() {
   const { status, setUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
-  // Already signed in (e.g. returning visitor): skip straight to the app.
+  // Already signed in: skip straight to the app
   useEffect(() => {
     if (status === 'authenticated') router.replace('/campaigns');
   }, [status, router]);
@@ -33,30 +35,11 @@ export default function LoginPage() {
     }
   };
 
-  const handleDevLogin = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const user = await api.devLogin();
-      setUser(user);
-      router.replace('/campaigns');
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : 'Dev sign-in failed.',
-      );
-      setBusy(false);
-    }
-  };
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      // In dev mode or with email input, authenticate seamlessly
       const user = await api.devLogin();
       setUser(user);
       router.replace('/campaigns');
@@ -77,16 +60,19 @@ export default function LoginPage() {
           </div>
         )}
 
+        {/* Google OAuth Login Button */}
         <div className="google-btn-figma-wrap">
           <GoogleSignInButton onCredential={handleCredential} disabled={busy} />
         </div>
 
+        {/* Divider */}
         <div className="login-divider-figma">
           <span className="login-divider-line" />
           <span className="login-divider-text">or sign up through email</span>
           <span className="login-divider-line" />
         </div>
 
+        {/* Email & Password Form */}
         <form onSubmit={handleEmailLogin} className="login-form-figma">
           <input
             type="email"
@@ -116,5 +102,7 @@ export default function LoginPage() {
     </div>
   );
 }
+
+
 
 
